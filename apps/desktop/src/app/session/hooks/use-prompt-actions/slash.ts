@@ -2,7 +2,7 @@ import { type MutableRefObject, useCallback } from 'react'
 
 import { getProfiles } from '@/hermes'
 import type { Translations } from '@/i18n'
-import { type ChatMessage } from '@/lib/chat-messages'
+import { type ChatMessage, toChatMessages } from '@/lib/chat-messages'
 import { parseCommandDispatch, parseSlashCommand, sessionTitle } from '@/lib/chat-runtime'
 import {
   type CommandsCatalogLike,
@@ -29,7 +29,13 @@ import {
   setYoloActive
 } from '@/store/session'
 
-import type { BrowserManageResponse, SessionTitleResponse, SlashExecResponse } from '../../../types'
+import type {
+  BrowserManageResponse,
+  ClientSessionState,
+  SessionCompressResponse,
+  SessionTitleResponse,
+  SlashExecResponse
+} from '../../../types'
 
 import { type GatewayRequest, isSessionIdCandidate, renderCommandsCatalog, slashStatusText } from './utils'
 
@@ -62,6 +68,11 @@ interface SlashCommandDeps {
     rawText: string,
     options?: { attachments?: ComposerAttachment[]; fromQueue?: boolean }
   ) => Promise<boolean>
+  updateSessionState: (
+    sessionId: string,
+    updater: (state: ClientSessionState) => ClientSessionState,
+    storedSessionId?: string | null
+  ) => ClientSessionState
 }
 
 /** The /slash command dispatcher, extracted from usePromptActions. */
@@ -79,7 +90,8 @@ export function useSlashCommand(deps: SlashCommandDeps) {
     requestGateway,
     resumeStoredSession,
     startFreshSessionDraft,
-    submitPromptText
+    submitPromptText,
+    updateSessionState
   } = deps
 
   return useCallback(
@@ -122,6 +134,55 @@ export function useSlashCommand(deps: SlashCommandDeps) {
 
         if (!isDesktopSlashCommand(name)) {
           renderSlashOutput(desktopSlashUnavailableMessage(name) || `/${name} is not available in the desktop app.`)
+
+          return
+        }
+
+        const renderCompressionSummary = (result: SessionCompressResponse): string => {
+          const summary = result.summary
+          const lines = [summary?.headline, summary?.token_line, summary?.note || undefined].filter(
+            (line): line is string => Boolean(line?.trim())
+          )
+
+          if (lines.length) {
+            return lines.join('\n')
+          }
+
+          if (typeof result.before_messages === 'number' && typeof result.after_messages === 'number') {
+            return `Compressed: ${result.before_messages} -> ${result.after_messages} messages`
+          }
+
+          return 'Compression complete.'
+        }
+
+        if (name === 'compress') {
+          if (busyRef.current) {
+            renderSlashOutput('session busy - /interrupt the current turn before /compress')
+
+            return
+          }
+
+          try {
+            const result = await requestGateway<SessionCompressResponse>('session.compress', {
+              focus_topic: arg,
+              session_id: sessionId
+            })
+
+            if (Array.isArray(result.messages)) {
+              const messages = toChatMessages(result.messages)
+
+              updateSessionState(sessionId, state => ({
+                ...state,
+                awaitingResponse: false,
+                busy: false,
+                messages
+              }))
+            }
+
+            renderSlashOutput(renderCompressionSummary(result))
+          } catch (err) {
+            renderSlashOutput(`error: ${err instanceof Error ? err.message : String(err)}`)
+          }
 
           return
         }
@@ -608,7 +669,8 @@ export function useSlashCommand(deps: SlashCommandDeps) {
       requestGateway,
       resumeStoredSession,
       startFreshSessionDraft,
-      submitPromptText
+      submitPromptText,
+      updateSessionState
     ]
   )
 }

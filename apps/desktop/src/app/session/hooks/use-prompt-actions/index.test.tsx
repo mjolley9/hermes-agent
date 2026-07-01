@@ -218,6 +218,68 @@ describe('usePromptActions slash.exec dispatch payloads', () => {
     vi.restoreAllMocks()
   })
 
+  it('runs /compress through the session.compress RPC and refreshes the desktop transcript', async () => {
+    const calls: { method: string; params?: Record<string, unknown> }[] = []
+    const states: Record<string, unknown>[] = []
+
+    const requestGateway = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+      calls.push({ method, params })
+
+      if (method === 'session.compress') {
+        return {
+          after_messages: 2,
+          before_messages: 6,
+          messages: [
+            { content: 'Earlier conversation summary', role: 'system', timestamp: 1 },
+            { content: 'Continue from here', role: 'user', timestamp: 2 }
+          ],
+          status: 'compressed',
+          summary: {
+            headline: 'Compressed: 6 → 2 messages',
+            token_line: 'Approx request size: ~140,000 → ~42,000 tokens'
+          }
+        } as never
+      }
+
+      return {} as never
+    })
+
+    let handle: HarnessHandle | null = null
+    render(
+      <Harness
+        onReady={h => (handle = h)}
+        onSeedState={s => states.push(s)}
+        refreshSessions={async () => undefined}
+        requestGateway={requestGateway}
+      />
+    )
+
+    await handle!.submitText('/compress old project decisions')
+
+    expect(calls.map(c => c.method)).toEqual(['session.compress'])
+    expect(calls[0]?.params).toEqual({
+      focus_topic: 'old project decisions',
+      session_id: RUNTIME_SESSION_ID
+    })
+    expect(requestGateway).not.toHaveBeenCalledWith('slash.exec', expect.anything())
+    expect(requestGateway).not.toHaveBeenCalledWith('command.dispatch', expect.anything())
+
+    const renderedText = states
+      .flatMap(state => {
+        const messages = Array.isArray(state.messages)
+          ? (state.messages as Array<{ parts?: Array<{ text?: string }> }>)
+          : []
+
+        return messages.flatMap(message => (message.parts ?? []).map(part => part.text ?? ''))
+      })
+      .join('\n')
+
+    expect(renderedText).toContain('Earlier conversation summary')
+    expect(renderedText).toContain('Continue from here')
+    expect(renderedText).toContain('Compressed: 6 → 2 messages')
+    expect(renderedText).toContain('Approx request size: ~140,000 → ~42,000 tokens')
+  })
+
   it('submits /goal send directives returned directly by slash.exec instead of rendering no output', async () => {
     const calls: { method: string; params?: Record<string, unknown> }[] = []
     const states: Record<string, unknown>[] = []
