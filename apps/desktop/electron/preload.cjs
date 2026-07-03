@@ -46,6 +46,30 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     set: name => ipcRenderer.invoke('hermes:profile:set', name)
   },
   api: request => ipcRenderer.invoke('hermes:api', request),
+  streamSpeech: {
+    start: (id, payload) => ipcRenderer.invoke('hermes:tts-stream:start', id, payload),
+    stop: id => ipcRenderer.invoke('hermes:tts-stream:stop', id),
+    onMeta: (id, callback) => {
+      const listener = (_event, payload) => callback(payload)
+      ipcRenderer.on(`hermes:tts-stream:${id}:meta`, listener)
+      return () => ipcRenderer.removeListener(`hermes:tts-stream:${id}:meta`, listener)
+    },
+    onChunk: (id, callback) => {
+      const listener = (_event, payload) => callback(payload)
+      ipcRenderer.on(`hermes:tts-stream:${id}:chunk`, listener)
+      return () => ipcRenderer.removeListener(`hermes:tts-stream:${id}:chunk`, listener)
+    },
+    onEnd: (id, callback) => {
+      const listener = (_event, payload) => callback(payload)
+      ipcRenderer.on(`hermes:tts-stream:${id}:end`, listener)
+      return () => ipcRenderer.removeListener(`hermes:tts-stream:${id}:end`, listener)
+    },
+    onError: (id, callback) => {
+      const listener = (_event, payload) => callback(payload)
+      ipcRenderer.on(`hermes:tts-stream:${id}:error`, listener)
+      return () => ipcRenderer.removeListener(`hermes:tts-stream:${id}:error`, listener)
+    }
+  },
   notify: payload => ipcRenderer.invoke('hermes:notify', payload),
   requestMicrophoneAccess: () => ipcRenderer.invoke('hermes:requestMicrophoneAccess'),
   readFileDataUrl: filePath => ipcRenderer.invoke('hermes:readFileDataUrl', filePath),

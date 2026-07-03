@@ -451,7 +451,8 @@ export function usePromptActions({
     requestGateway,
     resumeStoredSession,
     startFreshSessionDraft,
-    submitPromptText
+    submitPromptText,
+    updateSessionState
   })
 
   const submitText = useCallback(

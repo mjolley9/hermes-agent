@@ -63,6 +63,14 @@ declare global {
         set: (name: string | null) => Promise<DesktopActiveProfile>
       }
       api: <T>(request: HermesApiRequest) => Promise<T>
+      streamSpeech?: {
+        start: (id: string, payload: HermesTtsStreamRequest) => Promise<{ id: string; ok: boolean }>
+        stop: (id: string) => Promise<boolean>
+        onMeta: (id: string, callback: (payload: HermesTtsStreamMeta) => void) => () => void
+        onChunk: (id: string, callback: (payload: HermesTtsStreamChunk) => void) => () => void
+        onEnd: (id: string, callback: (payload: HermesTtsStreamEnd) => void) => () => void
+        onError: (id: string, callback: (payload: HermesTtsStreamError) => void) => () => void
+      }
       notify: (payload: HermesNotification) => Promise<boolean>
       requestMicrophoneAccess: () => Promise<boolean>
       readFileDataUrl: (filePath: string) => Promise<string>
@@ -522,6 +530,32 @@ export interface HermesApiRequest {
   // (window) backend. Read-only cross-profile data is served by the primary, so
   // this is only needed for profile-scoped live/settings calls.
   profile?: string | null
+}
+
+export interface HermesTtsStreamRequest {
+  model?: string
+  response_format?: 'pcm' | 'wav'
+  text: string
+  voice?: string
+}
+
+export interface HermesTtsStreamMeta {
+  mimeType?: string
+  responseFormat?: string
+}
+
+export interface HermesTtsStreamChunk {
+  data: string
+}
+
+export interface HermesTtsStreamEnd {
+  aborted?: boolean
+  mimeType?: string
+  responseFormat?: string
+}
+
+export interface HermesTtsStreamError {
+  message?: string
 }
 
 export interface HermesNotification {

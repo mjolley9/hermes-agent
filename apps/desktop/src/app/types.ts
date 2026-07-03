@@ -1,6 +1,7 @@
 import type * as React from 'react'
 
 import type { ChatMessage } from '@/lib/chat-messages'
+import type { SessionMessage, SessionRuntimeInfo, UsageStats } from '@/types/hermes'
 
 export interface ContextSuggestion {
   text: string
@@ -44,6 +45,26 @@ export interface FileAttachResponse {
 export interface SlashExecResponse {
   output?: string
   warning?: string
+}
+
+export interface SessionCompressSummary {
+  headline?: string
+  noop?: boolean
+  note?: null | string
+  token_line?: string
+}
+
+export interface SessionCompressResponse {
+  after_messages?: number
+  after_tokens?: number
+  before_messages?: number
+  before_tokens?: number
+  info?: SessionRuntimeInfo
+  messages?: SessionMessage[]
+  removed?: number
+  status?: string
+  summary?: SessionCompressSummary
+  usage?: Partial<UsageStats>
 }
 
 export interface BrowserManageResponse {
