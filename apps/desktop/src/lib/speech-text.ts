@@ -10,6 +10,8 @@ const THINKING_PREFIX_RE =
   /^\s*(?:\([^)\n]{1,48}\)\s*)?(?:processing|thinking|reasoning|analyzing|pondering|contemplating|musing|cogitating|ruminating|deliberating|mulling|reflecting|computing|synthesizing|formulating|brainstorming)\.\.\.\s*/i
 
 const URL_RE = /\bhttps?:\/\/\S+/gi
+const DEFAULT_SPEECH_CHUNK_CHARS = 280
+const SENTENCE_RE = /[^.!?]+(?:[.!?]+["')\]]*)?|[^.!?]+$/g
 
 function normalizeLineBreaks(text: string): string {
   return text
@@ -32,4 +34,84 @@ export function sanitizeTextForSpeech(text: string): string {
     .replace(/^\s*[-+*]\s+/gm, '')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function pushSpeechChunk(chunks: string[], current: string) {
+  const trimmed = current.trim()
+  if (trimmed) {
+    chunks.push(trimmed)
+  }
+}
+
+function splitLongSpeechPart(part: string, maxChars: number): string[] {
+  const chunks: string[] = []
+  let current = ''
+
+  for (const word of part.split(/\s+/)) {
+    if (!word) {
+      continue
+    }
+
+    if (word.length > maxChars) {
+      pushSpeechChunk(chunks, current)
+      current = ''
+      for (let start = 0; start < word.length; start += maxChars) {
+        chunks.push(word.slice(start, start + maxChars))
+      }
+      continue
+    }
+
+    const candidate = current ? `${current} ${word}` : word
+    if (candidate.length > maxChars) {
+      pushSpeechChunk(chunks, current)
+      current = word
+    } else {
+      current = candidate
+    }
+  }
+
+  pushSpeechChunk(chunks, current)
+  return chunks
+}
+
+export function splitTextForSpeech(text: string, maxChars = DEFAULT_SPEECH_CHUNK_CHARS): string[] {
+  const trimmed = text.trim()
+  const limit = Math.max(80, maxChars)
+
+  if (!trimmed) {
+    return []
+  }
+
+  if (trimmed.length <= limit) {
+    return [trimmed]
+  }
+
+  const chunks: string[] = []
+  let current = ''
+  const parts = trimmed.match(SENTENCE_RE) ?? [trimmed]
+
+  for (const rawPart of parts) {
+    const part = rawPart.trim()
+    if (!part) {
+      continue
+    }
+
+    if (part.length > limit) {
+      pushSpeechChunk(chunks, current)
+      current = ''
+      chunks.push(...splitLongSpeechPart(part, limit))
+      continue
+    }
+
+    const candidate = current ? `${current} ${part}` : part
+    if (candidate.length > limit) {
+      pushSpeechChunk(chunks, current)
+      current = part
+    } else {
+      current = candidate
+    }
+  }
+
+  pushSpeechChunk(chunks, current)
+  return chunks
 }

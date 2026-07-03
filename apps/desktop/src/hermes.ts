@@ -49,6 +49,7 @@ import type {
 
 const DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS = 30_000
 const SESSION_LIST_REQUEST_TIMEOUT_MS = 60_000
+const VOICE_REQUEST_TIMEOUT_MS = 120_000
 
 export type {
   ActionResponse,
@@ -854,8 +855,10 @@ export function getActionStatus(name: string, lines = 200): Promise<ActionStatus
 
 export function transcribeAudio(dataUrl: string, mimeType?: string): Promise<AudioTranscriptionResponse> {
   return window.hermesDesktop.api<AudioTranscriptionResponse>({
+    ...profileScoped(),
     path: '/api/audio/transcribe',
     method: 'POST',
+    timeoutMs: VOICE_REQUEST_TIMEOUT_MS,
     body: {
       data_url: dataUrl,
       mime_type: mimeType
@@ -865,14 +868,17 @@ export function transcribeAudio(dataUrl: string, mimeType?: string): Promise<Aud
 
 export function speakText(text: string): Promise<AudioSpeakResponse> {
   return window.hermesDesktop.api<AudioSpeakResponse>({
+    ...profileScoped(),
     path: '/api/audio/speak',
     method: 'POST',
+    timeoutMs: VOICE_REQUEST_TIMEOUT_MS,
     body: { text }
   })
 }
 
 export function getElevenLabsVoices(): Promise<ElevenLabsVoicesResponse> {
   return window.hermesDesktop.api<ElevenLabsVoicesResponse>({
+    ...profileScoped(),
     path: '/api/audio/elevenlabs/voices'
   })
 }

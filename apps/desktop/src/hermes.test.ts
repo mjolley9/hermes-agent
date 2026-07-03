@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { getSessionMessages, listAllProfileSessions, listSessions } from './hermes'
+import {
+  getSessionMessages,
+  listAllProfileSessions,
+  listSessions,
+  setApiRequestProfile,
+  speakText,
+  transcribeAudio
+} from './hermes'
 
 const emptySessionsResponse = {
   limit: 0,
@@ -21,6 +28,7 @@ describe('Hermes REST session helpers', () => {
   })
 
   afterEach(() => {
+    setApiRequestProfile(null)
     vi.restoreAllMocks()
     Reflect.deleteProperty(window, 'hermesDesktop')
   })
@@ -55,6 +63,50 @@ describe('Hermes REST session helpers', () => {
     expect(api).toHaveBeenCalledWith({
       path: '/api/sessions/session-1/messages?profile=xiaoxuxu',
       profile: 'xiaoxuxu'
+    })
+  })
+
+  it('uses a longer timeout for text to speech', async () => {
+    api.mockResolvedValue({ data_url: 'data:audio/wav;base64,' })
+
+    await speakText('Hello from Hermes.')
+
+    expect(api).toHaveBeenCalledWith({
+      path: '/api/audio/speak',
+      method: 'POST',
+      timeoutMs: 120_000,
+      body: { text: 'Hello from Hermes.' }
+    })
+  })
+
+  it('uses a longer timeout for speech to text', async () => {
+    api.mockResolvedValue({ text: 'Hello from Hermes.' })
+
+    await transcribeAudio('data:audio/wav;base64,AAAA', 'audio/wav')
+
+    expect(api).toHaveBeenCalledWith({
+      path: '/api/audio/transcribe',
+      method: 'POST',
+      timeoutMs: 120_000,
+      body: {
+        data_url: 'data:audio/wav;base64,AAAA',
+        mime_type: 'audio/wav'
+      }
+    })
+  })
+
+  it('routes audio helpers through the active profile backend', async () => {
+    setApiRequestProfile('celeste')
+    api.mockResolvedValue({ data_url: 'data:audio/wav;base64,' })
+
+    await speakText('Hello from Celeste.')
+
+    expect(api).toHaveBeenCalledWith({
+      profile: 'celeste',
+      path: '/api/audio/speak',
+      method: 'POST',
+      timeoutMs: 120_000,
+      body: { text: 'Hello from Celeste.' }
     })
   })
 })

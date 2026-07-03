@@ -778,6 +778,11 @@ const POOL_IDLE_MS = Math.max(60_000, Number(process.env.HERMES_DESKTOP_POOL_IDL
 // killing one to honor the soft cap would abort a running agent.
 const POOL_KEEPALIVE_FRESH_MS = 90_000
 let poolIdleReaper = null
+const TTS_STREAM_URL =
+  process.env.HERMES_DESKTOP_TTS_STREAM_URL || 'http://127.0.0.1:8129/v1/audio/speech'
+const TTS_STREAM_MODEL = process.env.HERMES_DESKTOP_TTS_STREAM_MODEL || 'local-tts'
+const TTS_STREAM_VOICE = process.env.HERMES_DESKTOP_TTS_STREAM_VOICE || 'Natasha_Soothing'
+const ttsStreamSessions = new Map()
 // Auto-reload budget for renderer crashes. A deterministic startup crash would
 // otherwise loop forever (reload → crash → reload), pinning CPU and spamming
 // logs. Allow a few reloads per rolling window, then stop and leave the dead
@@ -3271,6 +3276,109 @@ function fetchJson(url, token, options = {}) {
     if (body) req.write(body)
     req.end()
   })
+}
+
+function ttsStreamChannel(id, suffix) {
+  return `hermes:tts-stream:${id}:${suffix}`
+}
+
+function sanitizeTtsStreamId(value) {
+  const id = String(value || '').trim()
+  if (!/^[A-Za-z0-9_-]{8,96}$/.test(id)) {
+    throw new Error('Invalid TTS stream id')
+  }
+  return id
+}
+
+function sendTtsStreamEvent(webContents, id, suffix, payload) {
+  if (!webContents || webContents.isDestroyed()) {
+    return
+  }
+
+  webContents.send(ttsStreamChannel(id, suffix), payload)
+}
+
+function stopTtsStream(id) {
+  const stream = ttsStreamSessions.get(String(id || ''))
+  if (!stream) {
+    return false
+  }
+
+  stream.controller.abort()
+  return true
+}
+
+async function readResponseText(response) {
+  try {
+    return await response.text()
+  } catch {
+    return ''
+  }
+}
+
+async function runTtsStream(id, webContents, payload, controller) {
+  try {
+    const text = String(payload?.text || '').trim()
+    if (!text) {
+      throw new Error('TTS input is empty')
+    }
+
+    const requestedFormat = String(payload?.response_format || 'pcm').toLowerCase()
+    const responseFormat = requestedFormat === 'wav' ? 'wav' : 'pcm'
+    const body = {
+      model: String(payload?.model || TTS_STREAM_MODEL),
+      input: text,
+      voice: String(payload?.voice || TTS_STREAM_VOICE),
+      response_format: responseFormat,
+      stream_format: 'audio'
+    }
+    const response = await electronNet.fetch(TTS_STREAM_URL, {
+      body: JSON.stringify(body),
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      method: 'POST',
+      signal: controller.signal
+    })
+
+    if (!response.ok) {
+      const responseText = await readResponseText(response)
+      throw new Error(`${response.status}: ${responseText || response.statusText || 'TTS stream failed'}`)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      throw new Error('TTS stream did not return a readable body')
+    }
+
+    const mimeType = response.headers.get('content-type') || (responseFormat === 'pcm' ? 'audio/pcm' : 'audio/wav')
+    sendTtsStreamEvent(webContents, id, 'meta', { mimeType, responseFormat })
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
+
+      if (value?.byteLength) {
+        sendTtsStreamEvent(webContents, id, 'chunk', {
+          data: Buffer.from(value).toString('base64')
+        })
+      }
+    }
+
+    sendTtsStreamEvent(webContents, id, 'end', { aborted: false, mimeType, responseFormat })
+  } catch (error) {
+    if (controller.signal.aborted) {
+      sendTtsStreamEvent(webContents, id, 'end', { aborted: true })
+    } else {
+      sendTtsStreamEvent(webContents, id, 'error', {
+        message: error?.message || 'TTS stream failed'
+      })
+    }
+  } finally {
+    ttsStreamSessions.delete(id)
+  }
 }
 
 function fetchPublicJson(url, options = {}) {
@@ -6492,6 +6600,30 @@ ipcMain.handle('hermes:api', async (_event, request) => {
     timeoutMs
   })
 })
+
+ipcMain.handle('hermes:tts-stream:start', async (event, id, payload = {}) => {
+  const streamId = sanitizeTtsStreamId(id)
+  if (ttsStreamSessions.has(streamId)) {
+    throw new Error('TTS stream id is already active')
+  }
+
+  const controller = new AbortController()
+  const onDestroyed = () => stopTtsStream(streamId)
+  ttsStreamSessions.set(streamId, { controller, webContentsId: event.sender.id })
+  event.sender.once('destroyed', onDestroyed)
+
+  void runTtsStream(streamId, event.sender, payload, controller).finally(() => {
+    try {
+      event.sender.removeListener('destroyed', onDestroyed)
+    } catch {
+      // The renderer may already be gone.
+    }
+  })
+
+  return { id: streamId, ok: true }
+})
+
+ipcMain.handle('hermes:tts-stream:stop', async (_event, id) => stopTtsStream(id))
 
 ipcMain.handle('hermes:notify', (_event, payload) => {
   if (!Notification.isSupported()) return false
