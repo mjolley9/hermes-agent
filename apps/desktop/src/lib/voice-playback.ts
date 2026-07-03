@@ -15,6 +15,7 @@ import { sanitizeTextForSpeech, splitTextForSpeech } from './speech-text'
 const PLAYBACK_STALL_MS = 15_000
 const STREAMING_AUDIO_SAMPLE_RATE = 24_000
 const STREAMING_RESPONSE_FORMAT = 'pcm'
+const STREAMING_TAIL_FADE_MS = 45
 
 type BrowserAudioContext = typeof AudioContext
 
@@ -58,12 +59,32 @@ function decodeBase64AudioChunk(data: string): Uint8Array {
 
 function getAudioContextConstructor(): BrowserAudioContext | null {
   const audioWindow = window as Window & { webkitAudioContext?: BrowserAudioContext }
+
   return window.AudioContext || audioWindow.webkitAudioContext || null
 }
 
 function canUseStreamingPlayback(): boolean {
   const streamSpeech = window.hermesDesktop.streamSpeech
+
   return Boolean(streamSpeech && getAudioContextConstructor())
+}
+
+function concatAudioSamples(first: Float32Array, second: Float32Array): Float32Array {
+  const combined = new Float32Array(first.length + second.length)
+  combined.set(first, 0)
+  combined.set(second, first.length)
+
+  return combined
+}
+
+function fadeOutSamples(samples: Float32Array): Float32Array {
+  const faded = samples.slice()
+
+  for (let index = 0; index < faded.length; index += 1) {
+    faded[index] *= Math.max(0, (faded.length - index - 1) / faded.length)
+  }
+
+  return faded
 }
 
 export function stopVoicePlayback() {
@@ -103,9 +124,11 @@ async function playStreamingSpeechChunk(
   const audioContext = new AudioContextCtor()
   const disposers: (() => void)[] = []
   const activeSources = new Set<AudioBufferSourceNode>()
+  const tailSampleCount = Math.max(1, Math.round((STREAMING_AUDIO_SAMPLE_RATE * STREAMING_TAIL_FADE_MS) / 1000))
 
   let carry: Uint8Array | null = null
   let finishTimer: number | null = null
+  let heldTail: Float32Array | null = null
   let nextStartAt = 0
   let streamEnded = false
   let receivedAnyChunk = false
@@ -126,6 +149,7 @@ async function playStreamingSpeechChunk(
         } catch {
           // Source may have ended naturally already.
         }
+
         source.disconnect()
       })
       activeSources.clear()
@@ -156,6 +180,7 @@ async function playStreamingSpeechChunk(
         settled = true
         cleanup()
         reject(error ?? new Error('Streaming playback failed'))
+
         return
       }
 
@@ -222,10 +247,12 @@ async function playStreamingSpeechChunk(
       )
 
       const startAt = Math.max(nextStartAt, audioContext.currentTime + 0.02)
+
       try {
         source.start(startAt)
       } catch (error) {
         fail(error instanceof Error ? error : new Error('Streaming playback failed'))
+
         return
       }
 
@@ -242,11 +269,36 @@ async function playStreamingSpeechChunk(
       }
     }
 
+    function schedulePcmSamplesWithTail(samples: Float32Array) {
+      const combined = heldTail ? concatAudioSamples(heldTail, samples) : samples
+
+      if (combined.length <= tailSampleCount) {
+        heldTail = combined
+
+        return
+      }
+
+      const playableLength = combined.length - tailSampleCount
+      schedulePcmSamples(combined.slice(0, playableLength))
+      heldTail = combined.slice(playableLength)
+    }
+
+    function flushHeldTail() {
+      if (!heldTail?.length) {
+        return
+      }
+
+      const tail = heldTail
+      heldTail = null
+      schedulePcmSamples(fadeOutSamples(tail))
+    }
+
     function handleAudioChunk(data: string) {
       const samples = decodePcm16Chunk(decodeBase64AudioChunk(data))
+
       if (samples) {
         receivedAnyChunk = true
-        schedulePcmSamples(samples)
+        schedulePcmSamplesWithTail(samples)
       }
     }
 
@@ -271,12 +323,16 @@ async function playStreamingSpeechChunk(
       streamSpeech.onEnd(streamId, payload => {
         if (payload.aborted) {
           finish(false)
+
           return
         }
 
         streamEnded = true
+        flushHeldTail()
+
         if (!receivedAnyChunk) {
           finish(false)
+
           return
         }
 
