@@ -847,15 +847,16 @@ def run_conversation(
 
         if moa_config:
             try:
-                from agent.moa_loop import aggregate_moa_context
+                from agent.moa_loop import _preset_temperature, aggregate_moa_context
 
                 _moa_context = aggregate_moa_context(
                     user_prompt=original_user_message if isinstance(original_user_message, str) else str(original_user_message),
                     api_messages=api_messages,
                     reference_models=moa_config.get("reference_models") or [],
                     aggregator=moa_config.get("aggregator") or {},
-                    temperature=float(moa_config.get("reference_temperature", 0.6) or 0.6),
-                    aggregator_temperature=float(moa_config.get("aggregator_temperature", 0.4) or 0.4),
+                    temperature=_preset_temperature(moa_config, "reference_temperature"),
+                    aggregator_temperature=_preset_temperature(moa_config, "aggregator_temperature"),
+                    max_tokens=moa_config.get("reference_max_tokens"),
                 )
                 if _moa_context:
                     for _msg in reversed(api_messages):
@@ -2034,11 +2035,27 @@ def run_conversation(
                         api_duration, _cache_pct,
                     )
 
+                    # On the MoA path, agent.model/provider are the virtual
+                    # preset name ("closed") and "moa", which have no pricing
+                    # entry — estimating against them returns None and silently
+                    # drops the aggregator's own spend, leaving the session cost
+                    # as advisor-fan-out only (a ~50% undercount when the
+                    # aggregator does the full acting loop). Price the aggregator
+                    # turn at its REAL model/provider, read from the MoA client's
+                    # resolved aggregator slot.
+                    _agg_cost_model = agent.model
+                    _agg_cost_provider = agent.provider
+                    _agg_cost_base_url = agent.base_url
+                    _agg_slot = getattr(_moa_client, "last_aggregator_slot", None) if _moa_client is not None else None
+                    if _agg_slot and _agg_slot.get("model"):
+                        _agg_cost_model = _agg_slot["model"]
+                        _agg_cost_provider = _agg_slot.get("provider") or agent.provider
+                        _agg_cost_base_url = _agg_slot.get("base_url") or agent.base_url
                     cost_result = estimate_usage_cost(
-                        agent.model,
+                        _agg_cost_model,
                         aggregator_usage,
-                        provider=agent.provider,
-                        base_url=agent.base_url,
+                        provider=_agg_cost_provider,
+                        base_url=_agg_cost_base_url,
                         api_key=getattr(agent, "api_key", ""),
                     )
                     if cost_result.amount_usd is not None:
