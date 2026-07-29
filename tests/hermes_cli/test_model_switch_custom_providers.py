@@ -184,14 +184,18 @@ def test_list_authenticated_providers_includes_active_bare_custom_endpoint(monke
 def test_list_authenticated_providers_can_probe_active_bare_custom_endpoint(monkeypatch):
     monkeypatch.setattr("agent.models_dev.fetch_models_dev", lambda: {})
     monkeypatch.setattr(providers_mod, "HERMES_OVERLAYS", {})
-    monkeypatch.setattr(
-        "hermes_cli.models.fetch_api_models",
-        lambda api_key, api_url, **kwargs: ["gpt-4o", "gpt-4o-mini"],
-    )
+    calls = []
+
+    def fetch(api_key, api_url, **kwargs):
+        calls.append((api_key, api_url))
+        return ["gpt-4o", "gpt-4o-mini"]
+
+    monkeypatch.setattr("hermes_cli.models.fetch_api_models", fetch)
 
     providers = list_authenticated_providers(
         current_provider="custom",
         current_base_url="https://www.ccsub.net/v1",
+        current_api_key="sk-current-custom",
         current_model="gpt-4o",
         user_providers={},
         custom_providers=[],
@@ -200,6 +204,7 @@ def test_list_authenticated_providers_can_probe_active_bare_custom_endpoint(monk
     )
 
     bare_custom = next(p for p in providers if p["slug"] == "custom")
+    assert calls == [("sk-current-custom", "https://www.ccsub.net/v1")]
     assert bare_custom["is_current"] is True
     assert bare_custom["models"] == ["gpt-4o", "gpt-4o-mini"]
 

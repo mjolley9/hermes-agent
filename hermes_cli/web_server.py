@@ -6148,11 +6148,13 @@ def get_model_info(profile: Optional[str] = None):
             model_name = model_cfg.get("default", model_cfg.get("name", ""))
             provider = model_cfg.get("provider", "")
             base_url = model_cfg.get("base_url", "")
+            api_key = model_cfg.get("api_key", "")
             config_ctx = model_cfg.get("context_length")
         else:
             model_name = str(model_cfg) if model_cfg else ""
             provider = ""
             base_url = ""
+            api_key = ""
             config_ctx = None
 
         if not model_name:
@@ -6166,6 +6168,7 @@ def get_model_info(profile: Optional[str] = None):
                 model=model_name,
                 base_url=base_url,
                 provider=provider,
+                api_key=api_key if isinstance(api_key, str) else "",
                 config_context_length=None,  # ignore override — we want auto value
             )
         except Exception:

@@ -2476,6 +2476,36 @@ class TestModelInfoEndpoint:
         assert data["config_context_length"] == 100000
         assert data["effective_context_length"] == 100000  # override wins
 
+    def test_model_info_forwards_custom_endpoint_api_key(self, monkeypatch):
+        from contextlib import nullcontext
+
+        import hermes_cli.web_server as ws
+
+        monkeypatch.setattr(ws, "_profile_scope", lambda _profile: nullcontext())
+        monkeypatch.setattr(ws, "load_config", lambda: {
+            "model": {
+                "default": "hermes-agent",
+                "provider": "custom",
+                "base_url": "http://127.0.0.1:8645/v1",
+                "api_key": "sk-current-custom",
+            }
+        })
+
+        with patch(
+            "agent.model_metadata.get_model_context_length",
+            return_value=131072,
+        ) as mock_context:
+            resp = self.client.get("/api/model/info")
+
+        assert resp.status_code == 200
+        mock_context.assert_called_once_with(
+            model="hermes-agent",
+            base_url="http://127.0.0.1:8645/v1",
+            provider="custom",
+            api_key="sk-current-custom",
+            config_context_length=None,
+        )
+        assert "sk-current-custom" not in resp.text
 
     def test_model_info_graceful_on_metadata_error(self, monkeypatch):
         """Endpoint should return zeros on import/resolution errors, not 500."""

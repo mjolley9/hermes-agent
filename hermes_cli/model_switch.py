@@ -1902,6 +1902,7 @@ def prewarm_picker_cache_async() -> Optional["_threading.Thread"]:
             list_authenticated_providers(
                 current_provider=ctx.current_provider,
                 current_base_url=ctx.current_base_url,
+                current_api_key=ctx.current_api_key,
                 current_model=ctx.current_model,
                 user_providers=ctx.user_providers,
                 custom_providers=ctx.custom_providers,
@@ -1922,6 +1923,7 @@ def list_authenticated_providers(
     user_providers: dict = None,
     custom_providers: list | None = None,
     *,
+    current_api_key: str = "",
     force_fresh_nous_tier: bool = False,
     max_models: int | None = None,
     current_model: str = "",
@@ -2771,7 +2773,7 @@ def list_authenticated_providers(
                 from hermes_cli.models import fetch_api_models
 
                 _live_models = fetch_api_models(
-                    "",
+                    current_api_key,
                     str(current_base_url).strip().rstrip("/"),
                     timeout=1.5 if for_picker else 5.0,  # picker: fail fast on a slow current endpoint
                 )

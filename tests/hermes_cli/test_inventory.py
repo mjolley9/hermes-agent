@@ -40,6 +40,29 @@ def _cfg(model=None, providers=None, custom_providers=None) -> dict:
     }
 
 
+def test_load_picker_context_full_dict():
+    cfg = _cfg(
+        model={
+            "default": "anthropic/claude-sonnet-4.6",
+            "provider": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "sk-private-picker-key",
+        },
+        providers={"openrouter": {}},
+        custom_providers=[{"name": "Ollama", "base_url": "http://localhost:11434/v1"}],
+    )
+    with patch("hermes_cli.config.load_config", return_value=cfg):
+        ctx = load_picker_context()
+    assert ctx.current_model == "anthropic/claude-sonnet-4.6"
+    assert ctx.current_provider == "openrouter"
+    assert ctx.current_base_url == "https://openrouter.ai/api/v1"
+    assert ctx.current_api_key == "sk-private-picker-key"
+    assert "sk-private-picker-key" not in repr(ctx)
+    assert "openrouter" in ctx.user_providers
+    # custom_providers comes from get_compatible_custom_providers, which
+    # merges legacy list + v12+ keyed providers — both present here means
+    # at least one row.
+    assert isinstance(ctx.custom_providers, list)
 
 
 
@@ -47,13 +70,19 @@ def _cfg(model=None, providers=None, custom_providers=None) -> dict:
 # ─── with_overrides ────────────────────────────────────────────────────
 
 
-def _empty_ctx(provider="orig", model="orig-model", base_url="orig-url"):
+def _empty_ctx(
+    provider="orig",
+    model="orig-model",
+    base_url="orig-url",
+    api_key="",
+):
     return ConfigContext(
         current_provider=provider,
         current_model=model,
         current_base_url=base_url,
         user_providers={},
         custom_providers=[],
+        current_api_key=api_key,
     )
 
 
@@ -84,6 +113,23 @@ def _nous_row(model: str = "openai/gpt-5.5") -> dict:
     }
 
 
+def test_build_models_payload_can_probe_only_current_custom_provider():
+    ctx = _empty_ctx(api_key="sk-current-custom")
+    rows = []
+    with patch(
+        "hermes_cli.model_switch.list_authenticated_providers",
+        return_value=rows,
+    ) as mock_list:
+        build_models_payload(
+            ctx,
+            probe_custom_providers=False,
+            probe_current_custom_provider=True,
+        )
+
+    mock_list.assert_called_once()
+    assert mock_list.call_args.kwargs["probe_custom_providers"] is False
+    assert mock_list.call_args.kwargs["probe_current_custom_provider"] is True
+    assert mock_list.call_args.kwargs["current_api_key"] == "sk-current-custom"
 
 
 def test_cli_model_picker_forwards_force_refresh_to_probe_flags():

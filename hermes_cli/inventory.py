@@ -33,7 +33,7 @@ Substrate facts (verified May 2026):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 
@@ -53,6 +53,7 @@ class ConfigContext:
     user_providers: dict
     custom_providers: list
     excluded_providers: list = None
+    current_api_key: str = field(default="", repr=False)
 
     def with_overrides(
         self,
@@ -91,11 +92,13 @@ def load_picker_context() -> ConfigContext:
         current_model = model_cfg.get("default", model_cfg.get("name", "")) or ""
         current_provider = model_cfg.get("provider", "") or ""
         current_base_url = model_cfg.get("base_url", "") or ""
+        current_api_key = model_cfg.get("api_key", "") or ""
     else:
         # config.model can be a bare string in older configs.
         current_model = str(model_cfg) if model_cfg else ""
         current_provider = ""
         current_base_url = ""
+        current_api_key = ""
     raw = cfg.get("providers")
     excluded = cfg.get("model_catalog", {}).get("excluded_providers") or []
     return ConfigContext(
@@ -105,6 +108,7 @@ def load_picker_context() -> ConfigContext:
         user_providers=raw if isinstance(raw, dict) else {},
         custom_providers=get_compatible_custom_providers(cfg),
         excluded_providers=excluded if isinstance(excluded, list) else [],
+        current_api_key=str(current_api_key),
     )
 
 
@@ -188,6 +192,7 @@ def build_models_payload(
     rows = list_authenticated_providers(
         current_provider=ctx.current_provider,
         current_base_url=ctx.current_base_url,
+        current_api_key=ctx.current_api_key,
         current_model=ctx.current_model,
         user_providers=ctx.user_providers,
         custom_providers=ctx.custom_providers,
