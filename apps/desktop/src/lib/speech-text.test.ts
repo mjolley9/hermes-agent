@@ -13,7 +13,7 @@ describe('sanitizeTextForSpeech', () => {
     expect(sanitizeTextForSpeech('Use `git status` after the change.')).toBe('Use git status after the change.')
   })
 
-  it('skips markdown table data while preserving surrounding human text', () => {
+  it('turns markdown table data into spoken rows while preserving surrounding human text', () => {
     const text = `Here is the quick takeaway: the totals remain unchanged.
 
 | Item | Value | Notes |
@@ -24,7 +24,7 @@ describe('sanitizeTextForSpeech', () => {
 Full detail stays visible on screen.`
 
     expect(sanitizeTextForSpeech(text)).toBe(
-      'Here is the quick takeaway: the totals remain unchanged. Full detail stays visible on screen.'
+      'Here is the quick takeaway: the totals remain unchanged. Item: Example A; Value: 10; Notes: first row. Item: Example B; Value: 20; Notes: second row. Full detail stays visible on screen.'
     )
   })
 
@@ -50,7 +50,7 @@ Second sentence.`
     expect(sanitizeTextForSpeech(text)).toBe(expected)
   })
 
-  it('skips markdown tables without leading and trailing pipes', () => {
+  it('speaks markdown tables without leading and trailing pipes', () => {
     const text = `Main takeaway: total is unchanged.
 
 Item | Value
@@ -60,10 +60,12 @@ Example B | 20
 
 Done.`
 
-    expect(sanitizeTextForSpeech(text)).toBe('Main takeaway: total is unchanged. Done.')
+    expect(sanitizeTextForSpeech(text)).toBe(
+      'Main takeaway: total is unchanged. Item: Example A; Value: 10. Item: Example B; Value: 20. Done.'
+    )
   })
 
-  it('skips markdown tables nested inside blockquotes', () => {
+  it('speaks markdown tables nested inside blockquotes', () => {
     const text = `Before the table.
 
 > | Item | Value |
@@ -73,7 +75,9 @@ Done.`
 
 After the table.`
 
-    expect(sanitizeTextForSpeech(text)).toBe('Before the table. After the table.')
+    expect(sanitizeTextForSpeech(text)).toBe(
+      'Before the table. Item: Example A; Value: 10. Item: Example B; Value: 20. After the table.'
+    )
   })
 
   it('allows marker padding plus three spaces in blockquoted tables', () => {
@@ -85,10 +89,12 @@ After the table.`
 
 After the table.`
 
-    expect(sanitizeTextForSpeech(text)).toBe('Before the table. After the table.')
+    expect(sanitizeTextForSpeech(text)).toBe(
+      'Before the table. Item: Example A; Value: 10. After the table.'
+    )
   })
 
-  it('skips explicit single-column markdown tables', () => {
+  it('speaks explicit single-column markdown tables', () => {
     const text = `Before the table.
 
 | Item |
@@ -97,7 +103,7 @@ After the table.`
 
 After the table.`
 
-    expect(sanitizeTextForSpeech(text)).toBe('Before the table. After the table.')
+    expect(sanitizeTextForSpeech(text)).toBe('Before the table. Item: Example A. After the table.')
   })
 
   it('preserves rows outside a table blockquote', () => {
@@ -106,7 +112,7 @@ After the table.`
 > | Example A | 10 |
 Outside | prose`
 
-    expect(sanitizeTextForSpeech(text)).toBe('Outside | prose')
+    expect(sanitizeTextForSpeech(text)).toBe('Item: Example A; Value: 10. Outside | prose')
   })
 
   it('preserves malformed tables with mismatched column counts', () => {
@@ -117,7 +123,7 @@ Keep this prose.`
     expect(sanitizeTextForSpeech(text)).toContain('Heading | Detail')
   })
 
-  it('skips GFM body rows whose cell counts differ from the header', () => {
+  it('speaks available GFM cells when body row counts differ from the header', () => {
     const text = `Before the table.
 
 | Item | Value |
@@ -127,10 +133,12 @@ Keep this prose.`
 
 After the table.`
 
-    expect(sanitizeTextForSpeech(text)).toBe('Before the table. After the table.')
+    expect(sanitizeTextForSpeech(text)).toBe(
+      'Before the table. Item: Example A. Item: Example B; Value: 20. After the table.'
+    )
   })
 
-  it('skips tables containing escaped pipe characters', () => {
+  it('speaks tables containing escaped pipe characters', () => {
     const text = `Before the table.
 
 | Item \\| detail | Value |
@@ -139,7 +147,9 @@ After the table.`
 
 After the table.`
 
-    expect(sanitizeTextForSpeech(text)).toBe('Before the table. After the table.')
+    expect(sanitizeTextForSpeech(text)).toBe(
+      'Before the table. Item | detail: Example A; Value: 10. After the table.'
+    )
   })
 
   it('preserves indented code that resembles a table', () => {
@@ -148,5 +158,41 @@ After the table.`
     Example A | 10`
 
     expect(sanitizeTextForSpeech(text)).toContain('Item | Value')
+  })
+
+  it('turns email summary tables and compact dates into spoken sentences', () => {
+    const text = `Here are your two most recent received emails:
+
+| # | Subject | Received |
+|---|---|---|
+| 1 | Quarantined and Spam/Junk Email Report | Jul 3, 3:10 PM |
+| 2 | RE: Updated TB's | Jul 3, 10:22 AM |
+
+Want me to pull the body of either message?`
+
+    const sanitized = sanitizeTextForSpeech(text)
+
+    expect(sanitized).toContain(
+      'Item 1: Quarantined and Spam and Junk Email Report, received July 3rd, 3:10 PM.'
+    )
+    expect(sanitized).toContain('Item 2: RE: Updated T Bs, received July 3rd, 10:22 AM.')
+    expect(sanitized).not.toContain('|')
+    expect(sanitized).not.toContain('Jul 3')
+  })
+
+  it('normalizes numbered interview prompts and common speech tokens', () => {
+    const text = `Round 1 — Professional Role & Day-to-Day Work
+
+I know you're SVP Finance/Accounting.
+
+1. Ask 5-7 focused questions (e.g., close, reporting, etc.).
+2. What’s your email/calendar load like?`
+
+    const sanitized = sanitizeTextForSpeech(text)
+
+    expect(sanitized).toContain('Professional Role and Day-to-Day Work')
+    expect(sanitized).toContain('S V P Finance and Accounting')
+    expect(sanitized).toContain('Item 1: Ask 5 to 7 focused questions (for example, close, reporting, etcetera.)')
+    expect(sanitized).toContain('Item 2: What’s your email and calendar load like?')
   })
 })
