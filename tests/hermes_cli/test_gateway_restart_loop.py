@@ -9,6 +9,7 @@ Covers:
 import json
 import os
 from argparse import Namespace
+from pathlib import Path
 
 import pytest
 
@@ -695,6 +696,30 @@ class TestLifecycleGuardModule:
         )
         assert result is False
 
+    def test_read_referenced_script_tolerates_nul_in_path(self):
+        """An invalid path produced from binary bytes must not crash the guard."""
+        from cron.lifecycle_guard import _read_referenced_script
+
+        text, unsafe = _read_referenced_script(Path("/tmp/hermes\x00binary"))
+
+        assert text is None
+        assert unsafe is False
+
+    def test_remote_binary_content_does_not_reenter_script_scanner(self):
+        """A remote executable's binary bytes are not shell-script source."""
+        from cron.lifecycle_guard import (
+            contains_gateway_lifecycle_command_or_referenced_script,
+        )
+
+        binary_blob = "\x7fELF\x00hermes gateway restart\n"
+
+        result = contains_gateway_lifecycle_command_or_referenced_script(
+            "/remote/venv/bin/python --version",
+            read_remote_script=lambda _path: binary_blob,
+        )
+
+        assert result is False
+
     def test_shell_script_reference_walk_still_works(self, tmp_path):
         """The referenced-script walk still applies to real shell scripts:
         a .sh script that itself invokes a lifecycle command is caught."""
@@ -800,7 +825,7 @@ class TestTerminalToolGatewayLifecycleGuardRemote:
         import tools.terminal_tool as tt
 
         # Path only exists on the remote backend; locally it is absent, so the
-        # guard must fall back to env.execute('cat ...') to scan it.
+        # guard must fall back to a bounded env.execute read to scan it.
         script = "/remote/workspace/remote.sh"
         calls = []
 
@@ -809,7 +834,7 @@ class TestTerminalToolGatewayLifecycleGuardRemote:
             cwd = str(tmp_path)
             def execute(self, command, **kwargs):
                 calls.append(command)
-                if "cat" in command and "/remote/workspace/remote.sh" in command:
+                if "head -c" in command and "/remote/workspace/remote.sh" in command:
                     return {"output": "#!/bin/bash\\nhermes gateway restart\\n", "returncode": 0}
                 return {"output": "", "returncode": 0}
 
@@ -821,7 +846,7 @@ class TestTerminalToolGatewayLifecycleGuardRemote:
 
         assert result["exit_code"] == 1
         assert "referenced script" in result["error"]
-        assert any("cat" in c for c in calls)
+        assert any("head -c" in c for c in calls)
 
 
 class TestCronCreateLifecycleBlockExtra:

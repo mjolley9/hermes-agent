@@ -258,7 +258,10 @@ def _read_referenced_script(path: Path) -> tuple[Optional[str], bool]:
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
     try:
         descriptor = os.open(path, flags)
-    except OSError:
+    except (OSError, ValueError):
+        # os.open raises ValueError, not OSError, for an embedded NUL. Binary
+        # content must never be able to turn into a bogus path that crashes
+        # the lifecycle guard.
         return None, False
     try:
         metadata = os.fstat(descriptor)
@@ -283,6 +286,17 @@ def _read_referenced_script(path: Path) -> tuple[Optional[str], bool]:
     if len(data) > _MAX_REFERENCED_SCRIPT_BYTES:
         return None, True
     return data.decode("utf-8", errors="replace"), False
+
+
+def _sanitize_remote_script_text(text: Optional[str]) -> tuple[Optional[str], bool]:
+    """Apply the local referenced-script read contract to remote content."""
+    if not text:
+        return None, False
+    if "\x00" in text:
+        return None, False
+    if len(text.encode("utf-8", errors="replace")) > _MAX_REFERENCED_SCRIPT_BYTES:
+        return None, True
+    return text, False
 
 
 def _contains_unsafe_gateway_action(
@@ -325,8 +339,13 @@ def _contains_unsafe_gateway_action(
         if unsafe:
             return True
         if script_text is None and read_remote_script is not None:
-            # Local path missing; try the remote backend if one is available.
-            script_text = read_remote_script(str(script_path))
+            # Remote callbacks cross the same boundary as a local file read.
+            # Reject binary or oversized content before recursive tokenization.
+            script_text, unsafe = _sanitize_remote_script_text(
+                read_remote_script(str(script_path))
+            )
+            if unsafe:
+                return True
         if not script_text:
             continue
         # Relative references inside a script resolve against that script's

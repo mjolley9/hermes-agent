@@ -2503,6 +2503,7 @@ def terminal_tool(
         # but applies unconditionally (force=True cannot help here).
         if os.environ.get("_HERMES_GATEWAY") == "1":
             from cron.lifecycle_guard import (
+                _MAX_REFERENCED_SCRIPT_BYTES,
                 contains_gateway_lifecycle_command_or_referenced_script,
                 contains_launchctl_submit_command,
             )
@@ -2542,17 +2543,28 @@ def terminal_tool(
                         local_path = Path(guard_cwd) / local_path
                     if local_path.is_file():
                         metadata = local_path.stat()
-                        if stat.S_ISREG(metadata.st_mode) and metadata.st_size <= 1024 * 1024:
+                        if stat.S_ISREG(metadata.st_mode) and metadata.st_size <= _MAX_REFERENCED_SCRIPT_BYTES:
                             data = local_path.read_bytes()
-                            if len(data) <= 1024 * 1024:
+                            if len(data) <= _MAX_REFERENCED_SCRIPT_BYTES:
+                                if b"\x00" in data:
+                                    # Compiled interpreters and other binaries
+                                    # are executable payloads, not shell scripts
+                                    # for the lifecycle guard to recurse into.
+                                    return None
                                 return data.decode("utf-8", errors="replace")
                 except Exception:
                     pass
-                # Remote / sandboxed backend: read via the environment's shell.
+                # Remote / sandboxed backend: bound the read at the source.
                 try:
-                    result = env.execute(f"cat {shlex.quote(script_path)}")
+                    result = env.execute(
+                        f"head -c {_MAX_REFERENCED_SCRIPT_BYTES + 1} "
+                        f"< {shlex.quote(script_path)}"
+                    )
                     if result.get("returncode", -1) == 0:
-                        return result.get("output", "")
+                        output = result.get("output", "")
+                        if output and "\x00" in output:
+                            return None
+                        return output
                 except Exception:
                     pass
                 return None
